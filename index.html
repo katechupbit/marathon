@@ -1,0 +1,520 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Marathon Tracker</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dayjs@1.11.7/dayjs.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dayjs@1.11.7/plugin/isoWeek.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dayjs@1.11.7/plugin/weekOfYear.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dayjs@1.11.7/plugin/isBetween.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dayjs@1.11.7/plugin/isSameOrAfter.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+            -webkit-tap-highlight-color: transparent;
+        }
+        .main-container {
+            max-width: 450px;
+            margin: 0 auto;
+        }
+        .view { animation: fadeIn 0.3s ease-in-out; }
+        .view-hidden { display: none; }
+        
+        .tab-bar-item, button { transition: all 0.2s ease-in-out; }
+        .tab-bar-item.active { color: #2563eb; }
+        button:active, .tab-bar-item:active { transform: scale(0.95); }
+
+        .chart-container { height: 250px; position: relative; }
+        
+        .modal-bg { animation: fadeIn 0.2s ease-out; }
+        .modal-content { animation: slideUp 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes slideUp { from { opacity: 0; transform: translateY(50px); } to { opacity: 1; transform: translateY(0); } }
+        
+        .planned-run-item { transition: all 0.2s ease; }
+        .run-completed-animation { animation: bounceIn 0.5s ease; }
+        @keyframes bounceIn { 0%, 20%, 50%, 80%, 100% {transform: translateY(0);} 40% {transform: translateY(-10px);} 60% {transform: translateY(-5px);} }
+        .planned-run-item.dragging, .calendar-day-run.dragging { opacity: 0.4; transform: scale(1.05); }
+        
+        .calendar-grid { grid-template-columns: repeat(7, minmax(0, 1fr)); }
+        .calendar-day-cell { min-height: 80px; transition: background-color 0.2s ease; }
+        .calendar-day-run { transition: opacity 0.2s ease; }
+        .calendar-day-cell.drag-over { border: 2px dashed #2563eb; background-color: #dbeafe; }
+        
+        .workout-run { background-color: #dbeafe; border-color: #93c5fd; cursor: grab; }
+        .workout-crosstrain { background-color: #fef9c3; border-color: #fde047; cursor: grab; }
+        .workout-completed { background-color: #dcfce7; border-color: #86efac; cursor: default; }
+        .workout-completed .run-type { text-decoration: line-through; color: #6b7280; }
+
+        .skeleton-loader {
+            position: absolute; inset: 0; background-color: #f3f4f6; border-radius: 0.75rem; overflow: hidden;
+        }
+        .skeleton-loader::after {
+            content: ''; position: absolute; top: 0; left: -150%; width: 150%; height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.6), transparent);
+            animation: shimmer 1.5s infinite;
+        }
+        @keyframes shimmer { 0% { left: -150%; } 100% { left: 150%; } }
+    </style>
+</head>
+<body class="bg-slate-50 text-gray-800 h-full">
+
+    <div id="app" class="main-container bg-white h-full flex flex-col">
+        <!-- Header -->
+        <header class="p-4 border-b border-gray-200 sticky top-0 bg-white/95 backdrop-blur-sm z-10">
+            <h1 id="headerTitle" class="text-2xl font-bold text-gray-900">Training Dashboard</h1>
+            <p id="countdown" class="text-sm text-gray-500"></p>
+        </header>
+
+        <!-- Main Content Area -->
+        <main class="flex-grow overflow-y-auto">
+            <!-- Dashboard View -->
+            <div id="dashboard-view" class="view active p-4 md:p-6 space-y-6">
+                 <section id="today-focus-card" class="bg-gray-100 rounded-lg p-4 shadow-sm"></section>
+                 <section id="quick-stats-grid" class="grid grid-cols-3 gap-4"></section>
+                 <section id="weekly-plan-container">
+                    <h2 class="text-xl font-bold mb-3">This Week's Plan</h2>
+                    <div id="weeklyPlanList" class="space-y-3"></div>
+                </section>
+                <section id="recent-activity-container">
+                    <div class="flex justify-between items-center">
+                         <h2 class="text-xl font-bold">Recent Activity</h2>
+                         <button id="toggle-history-btn" class="text-sm text-blue-600 font-medium">Show All</button>
+                    </div>
+                    <div id="recentRunList" class="space-y-3 mt-3"></div>
+                </section>
+                 <section id="charts-container" class="space-y-6 pt-4">
+                    <h2 class="text-xl font-bold">Analysis</h2>
+                    <div class="chart-card-container">
+                        <div class="bg-gray-100 p-4 rounded-lg"><h3 class="font-semibold mb-2 text-center">Weekly Mileage (km)</h3><div class="chart-container"><div class="skeleton-loader"></div><canvas id="mileageChart" class="opacity-0"></canvas></div></div>
+                        <div class="bg-gray-100 p-4 rounded-lg"><h3 class="font-semibold mb-2 text-center">Pace Trend (min/km)</h3><div class="chart-container"><div class="skeleton-loader"></div><canvas id="paceChart" class="opacity-0"></canvas></div></div>
+                    </div>
+                </section>
+            </div>
+
+            <!-- Plan View -->
+            <div id="plan-view" class="view view-hidden p-4 md:p-6 space-y-6">
+                <div id="plan-calendar" class="space-y-8"></div>
+            </div>
+
+            <!-- History View -->
+            <div id="history-view" class="view view-hidden p-4 md:p-6 space-y-4">
+                <div class="flex justify-between items-center">
+                     <h2 class="text-xl font-bold">Full History</h2>
+                </div>
+                <div id="runList" class="space-y-3"></div>
+            </div>
+        </main>
+
+        <!-- Add Button & Tab Bar -->
+        <button id="addRunBtn" class="fixed bottom-20 right-6 bg-blue-600 text-white w-14 h-14 rounded-full flex items-center justify-center shadow-lg active:scale-95 transition-all"><i class="fas fa-plus fa-lg"></i></button>
+        <nav class="w-full bg-white/95 backdrop-blur-sm border-t border-gray-200 flex justify-around p-2 sticky bottom-0">
+            <button class="tab-bar-item active flex-1 flex flex-col items-center p-2 rounded-lg" data-view="dashboard-view"><i class="fas fa-tachometer-alt fa-lg"></i></button>
+            <button class="tab-bar-item flex-1 flex flex-col items-center p-2 rounded-lg" data-view="plan-view"><i class="fas fa-calendar-alt fa-lg"></i></button>
+            <button class="tab-bar-item flex-1 flex flex-col items-center p-2 rounded-lg" data-view="history-view"><i class="fas fa-list-ul fa-lg"></i></button>
+        </nav>
+    </div>
+
+    <!-- Add/Edit Run Modal -->
+    <div id="runModal" class="fixed inset-0 z-50 hidden"> <div class="modal-bg absolute inset-0 bg-black/40"></div> <div class="modal-content relative bg-white rounded-t-2xl mt-12 p-6 h-full flex flex-col"> <div class="flex-grow overflow-y-auto"> <h2 id="modalTitle" class="text-2xl font-bold mb-6">Log Run</h2> <form id="runForm" class="space-y-5"> <input type="hidden" id="runId"> <div> <label for="date" class="block text-sm font-medium text-gray-600 mb-1">Date</label> <input type="date" id="date" name="date" class="w-full bg-gray-100 border-transparent rounded-lg p-3" required> </div> <div> <label for="distance" class="block text-sm font-medium text-gray-600 mb-1">Distance (km)</label> <input type="number" id="distance" name="distance" step="0.01" min="0" class="w-full bg-gray-100 border-transparent rounded-lg p-3" required> </div> <div> <label for="time" class="block text-sm font-medium text-gray-600 mb-1">Time (minutes)</label> <input type="number" id="time" name="time" min="0" class="w-full bg-gray-100 border-transparent rounded-lg p-3" required> </div> <div> <label for="effort" class="block text-sm font-medium text-gray-600 mb-1">Effort (<span id="effortValue">5</span>/10)</label> <input type="range" id="effort" name="effort" min="1" max="10" value="5" class="w-full bg-gray-200 rounded-lg"> </div> <hr/> <div id="link-plan-section" class="space-y-2"> <label class="block text-sm font-medium text-gray-600">Link to a planned run (optional)</label> <div id="available-planned-runs" class="space-y-2"></div> </div> </form> </div> <div class="grid grid-cols-2 gap-3 pt-4 border-t border-gray-200"> <button type="button" id="cancelBtn" class="w-full p-3 bg-gray-200 font-semibold rounded-lg">Cancel</button> <button type="button" id="saveBtn" class="w-full p-3 bg-blue-600 text-white font-semibold rounded-lg">Save</button> </div> </div> </div>
+
+    <!-- Delete Confirmation Modal -->
+    <div id="deleteModal" class="fixed inset-0 z-50 hidden"> <div class="modal-bg absolute inset-0 bg-black/40"></div> <div class="modal-content relative bg-white rounded-xl p-6 w-11/12 max-w-sm mx-auto top-1/3"> <h2 class="text-xl font-bold mb-4">Confirm Deletion</h2> <p class="text-gray-600 mb-6">Are you sure you want to permanently delete this run?</p> <div class="grid grid-cols-2 gap-3"> <button type="button" id="cancelDeleteBtn" class="w-full p-3 bg-gray-200 font-semibold rounded-lg">Cancel</button> <button type="button" id="confirmDeleteBtn" class="w-full p-3 bg-red-600 text-white font-semibold rounded-lg">Delete</button> </div> </div> </div>
+    
+    <script type="module">
+        dayjs.extend(window.dayjs_plugin_isoWeek);
+        dayjs.extend(window.dayjs_plugin_weekOfYear);
+        dayjs.extend(window.dayjs_plugin_isBetween);
+        dayjs.extend(window.dayjs_plugin_isSameOrAfter);
+
+        const LOGGED_RUNS_KEY = 'marathon_logged_runs_v12_km';
+        const PLAN_RUNS_KEY = 'marathon_plan_runs_v12_km';
+        const MILE_TO_KM = 1.60934;
+
+        let state = { loggedRuns: [], planRuns: [], activeView: 'dashboard-view', isLoading: true, isHistoryExpanded: false };
+        let runIdToDelete = null;
+
+        function getInitialTrainingPlan() {
+            const plan = []; let currentDate = dayjs('2025-06-23').startOf('isoWeek'); const raceDate = dayjs('2026-03-08'); let runCounter = 0;
+            const addWorkout = (date, type, distance = 0, notes = '') => {
+                const effortMap = { "Easy Run": 4, "Long Run": 5, "Tempo Run": 7, "Intervals": 8, "Fartlek": 6, "Strides": 5, "Cross-Train": 3, "Race Day": 10 };
+                plan.push({ id: `plan-${runCounter++}`, type, distance, notes, date: date.format('YYYY-MM-DD'), effort: effortMap[type] || 4, completed: false });
+            };
+            let weekNum = 1;
+            while(currentDate.isBefore(raceDate)) {
+                const weekStart = currentDate;
+                if (currentDate.isBefore('2025-09-01')) {
+                    const phase1Week = weekNum; let easyDist = 2*MILE_TO_KM, longDist = 3*MILE_TO_KM;
+                    if (phase1Week >= 3) { easyDist = 3*MILE_TO_KM; longDist = 4*MILE_TO_KM; } if (phase1Week >= 5) { easyDist = 3.5*MILE_TO_KM; longDist = 5*MILE_TO_KM; } if (phase1Week >= 7) { easyDist = 4*MILE_TO_KM; longDist = 6*MILE_TO_KM; } if (phase1Week >= 9) { easyDist = 4*MILE_TO_KM; longDist = 7*MILE_TO_KM; }
+                    addWorkout(weekStart.add(1, 'day'), 'Easy Run', easyDist); addWorkout(weekStart.add(3, 'day'), 'Easy Run', easyDist); addWorkout(weekStart.add(4, 'day'), 'Cross-Train', 0, '30-45 mins'); addWorkout(weekStart.add(5, 'day'), 'Long Run', longDist);
+                } else if (currentDate.isBefore('2025-11-01')) {
+                    const phase2Week = weekNum - 10; const longDist = Math.min(12, 7 + phase2Week)*MILE_TO_KM; const midDist = Math.min(7, 5 + phase2Week * 0.5)*MILE_TO_KM;
+                    addWorkout(weekStart.add(1, 'day'), 'Easy Run', 4*MILE_TO_KM); addWorkout(weekStart.add(3, 'day'), phase2Week % 2 === 0 ? 'Fartlek' : 'Strides', midDist, 'Speed work'); addWorkout(weekStart.add(5, 'day'), 'Long Run', longDist); addWorkout(weekStart.add(6, 'day'), 'Cross-Train', 0, 'Active Recovery');
+                } else if (currentDate.isBefore('2026-02-01')) {
+                    const phase3Week = weekNum - 19; let longDist = 14;
+                    if (phase3Week >= 2) longDist = 15; if (phase3Week >= 4) longDist = 16; if (phase3Week >= 6) longDist = 18; if (phase3Week >= 8) longDist = 20; if (phase3Week >= 10) longDist = 16; if (phase3Week >= 12) longDist = 20;
+                    addWorkout(weekStart.add(1, 'day'), 'Easy Run', 5*MILE_TO_KM); addWorkout(weekStart.add(3, 'day'), 'Tempo Run', 7*MILE_TO_KM, 'Marathon Pace'); addWorkout(weekStart.add(5, 'day'), 'Long Run', longDist * MILE_TO_KM); addWorkout(weekStart.add(6, 'day'), 'Cross-Train', 0, 'Optional');
+                } else {
+                    const phase4Week = weekNum - 32; let longDist = 12;
+                    if(phase4Week === 2) longDist = 10; if(phase4Week === 3) longDist = 8; if(phase4Week === 4) longDist = 6; if(phase4Week === 5) longDist = 4;
+                    if (weekStart.add(6, 'day').isAfter(raceDate.subtract(1, 'week'))) {
+                        addWorkout(weekStart.add(1, 'day'), 'Easy Run', 2*MILE_TO_KM); addWorkout(weekStart.add(3, 'day'), 'Easy Run', 2*MILE_TO_KM); addWorkout(raceDate, 'Race Day', 42.2, 'Good Luck!');
+                    } else {
+                        addWorkout(weekStart.add(1, 'day'), 'Easy Run', 4*MILE_TO_KM); addWorkout(weekStart.add(3, 'day'), 'Easy Run', 3*MILE_TO_KM); addWorkout(weekStart.add(5, 'day'), 'Long Run', longDist*MILE_TO_KM);
+                    }
+                }
+                currentDate = currentDate.add(1, 'week'); weekNum++;
+            }
+            return plan;
+        }
+        
+        function loadState() {
+            state.loggedRuns = JSON.parse(localStorage.getItem(LOGGED_RUNS_KEY) || '[]');
+            let storedPlan = JSON.parse(localStorage.getItem(PLAN_RUNS_KEY) || 'null');
+            if (!storedPlan) { storedPlan = getInitialTrainingPlan(); savePlanRuns(storedPlan); }
+            state.planRuns = storedPlan;
+            const completedPlanIds = new Set(state.loggedRuns.map(lr => lr.linkedPlanId).filter(Boolean));
+            state.planRuns.forEach(pr => { pr.completed = completedPlanIds.has(pr.id); });
+        }
+        function saveLoggedRuns() { localStorage.setItem(LOGGED_RUNS_KEY, JSON.stringify(state.loggedRuns)); }
+        function savePlanRuns(plan = state.planRuns) { localStorage.setItem(PLAN_RUNS_KEY, JSON.stringify(plan)); }
+
+        const allViews = document.querySelectorAll('.view');
+        const tabBarItems = document.querySelectorAll('.tab-bar-item');
+        const headerTitleEl = document.getElementById('headerTitle');
+        const countdownEl = document.getElementById('countdown');
+        const runListEl = document.getElementById('runList');
+        const recentRunListEl = document.getElementById('recentRunList');
+        const weeklyPlanListEl = document.getElementById('weeklyPlanList');
+        const addRunBtn = document.getElementById('addRunBtn');
+        const runModal = document.getElementById('runModal');
+        const deleteModal = document.getElementById('deleteModal');
+        const runForm = document.getElementById('runForm');
+        const cancelBtn = document.getElementById('cancelBtn');
+        const saveBtn = document.getElementById('saveBtn');
+        const cancelDeleteBtn = document.getElementById('cancelDeleteBtn');
+        const confirmDeleteBtn = document.getElementById('confirmDeleteBtn');
+        const effortSlider = document.getElementById('effort');
+        const effortValueSpan = document.getElementById('effortValue');
+        const modalTitleEl = document.getElementById('modalTitle');
+        const runIdInput = document.getElementById('runId');
+        let charts = {};
+        
+        function switchView(viewId) {
+            const currentView = document.querySelector('.view.active');
+            const newView = document.getElementById(viewId);
+            if(currentView === newView) return;
+            currentView.classList.remove('active');
+            currentView.classList.add('view-hidden');
+            newView.classList.remove('view-hidden');
+            newView.classList.add('active');
+            state.activeView = viewId;
+            render();
+        }
+
+        function render() {
+            tabBarItems.forEach(t => t.classList.toggle('active', t.dataset.view === state.activeView));
+            const titles = { 'dashboard-view': 'Training Dashboard', 'plan-view': '2026 LA Marathon!', 'history-view': 'Run History' };
+            headerTitleEl.textContent = titles[state.activeView];
+            const sortedRuns = [...state.loggedRuns].sort((a,b) => dayjs(b.date).diff(dayjs(a.date)));
+            renderCountdown();
+            if (state.activeView === 'dashboard-view') {
+                renderTodaysFocus();
+                renderQuickStats(sortedRuns);
+                renderWeeklyPlan();
+                renderRecentActivity(sortedRuns);
+                if (!state.isLoading) updateCharts(sortedRuns);
+            }
+            if (state.activeView === 'plan-view') renderPlanCalendar();
+            if (state.activeView === 'history-view') renderRunList(sortedRuns);
+        }
+
+        function renderCountdown() {
+            const raceDate = dayjs('2026-03-08'); const now = dayjs(); const daysLeft = raceDate.diff(now, 'day');
+            countdownEl.textContent = daysLeft >= 0 ? `${daysLeft} days until race day! (March 8, 2026)` : `Congratulations on the race!`;
+        }
+        
+        function getWorkoutClass(run, prefix = 'workout') {
+            if (run.completed) return `${prefix}-completed`;
+            if (run.type === 'Cross-Train') return `${prefix}-crosstrain`;
+            if (run.type.toLowerCase().includes('run') || run.type.toLowerCase().includes('race')) return `${prefix}-run`;
+            return '';
+        }
+        
+        function getWorkoutIcon(run) {
+             if (run.completed) return 'fa-check-circle text-green-500';
+             if (run.type === 'Cross-Train') return 'fa-bicycle text-yellow-500';
+             if (run.type.toLowerCase().includes('run') || run.type.toLowerCase().includes('race')) return 'fa-shoe-prints text-blue-500';
+             return 'fa-circle text-gray-300';
+        }
+
+        function renderTodaysFocus() {
+            const today = dayjs().format('YYYY-MM-DD');
+            const todaysWorkouts = state.planRuns.filter(r => r.date === today);
+            const focusCard = document.getElementById('today-focus-card');
+            
+            const quotes = ["The miracle isn't that I finished. The miracle is that I had the courage to start.", "Every run is a work of art, a drawing on the canvas of body and soul.", "Pain is temporary. Quitting lasts forever."];
+            const gear = { cool: "Jacket and tights", warm: "Shorts and a t-shirt", hot: "Lightest gear you have!" };
+
+            let content;
+            if (todaysWorkouts.length > 0) {
+                const workout = todaysWorkouts[0];
+                const isRun = workout.type.toLowerCase().includes('run') || workout.type.toLowerCase().includes('race');
+                const details = isRun ? `${workout.distance.toFixed(1)} km` : workout.notes;
+                content = `
+                    <p class="text-sm font-medium text-gray-500">Today's Focus</p>
+                    <p class="text-2xl font-bold mt-1">${workout.type}</p>
+                    <p class="text-lg text-gray-700">${details}</p>
+                    <div class="text-sm text-gray-500 mt-4 pt-4 border-t border-gray-200">
+                       <p><i class="fas fa-tshirt fa-fw mr-2"></i>Gear: ${gear.warm}</p>
+                       <p class="mt-1"><i class="fas fa-quote-left fa-fw mr-2"></i>${quotes[Math.floor(Math.random() * quotes.length)]}</p>
+                    </div>`;
+            } else {
+                 content = `<p class="text-lg font-bold text-gray-700">Rest Day! Take it easy.</p>`;
+            }
+            focusCard.innerHTML = content;
+        }
+        
+        function renderQuickStats(runs) {
+            const weeklyMileage = runs.filter(run => dayjs(run.date).isSame(dayjs(), 'isoWeek')).reduce((sum, run) => sum + run.distance, 0);
+            const daysToRace = dayjs('2026-03-08').diff(dayjs(), 'day');
+            const currentPhase = state.planRuns.find(r => dayjs(r.date).isSameOrAfter(dayjs(), 'day'))?.type || 'Easy';
+            const paceGoal = { 'Easy Run': '6:30', 'Long Run': '7:00', 'Tempo Run': '5:45', 'Fartlek': 'Varies', 'Strides': 'Fast'}[currentPhase] || 'N/A';
+            
+            document.getElementById('quick-stats-grid').innerHTML = `
+                <div class="bg-gray-100 p-3 rounded-lg text-center shadow-sm"><p class="text-xs text-gray-500">Weekly km</p><p class="text-2xl font-bold">${weeklyMileage.toFixed(1)}</p></div>
+                <div class="bg-gray-100 p-3 rounded-lg text-center shadow-sm"><p class="text-xs text-gray-500">Days to Race</p><p class="text-2xl font-bold">${daysToRace}</p></div>
+                <div class="bg-gray-100 p-3 rounded-lg text-center shadow-sm"><p class="text-xs text-gray-500">Pace Goal</p><p class="text-2xl font-bold">${paceGoal}</p></div>
+            `;
+        }
+
+        function renderWeeklyPlan() {
+            const now = dayjs(); const startOfWeek = now.startOf('isoWeek'); const endOfWeek = now.endOf('isoWeek');
+            const weeklyPlan = state.planRuns.filter(run => dayjs(run.date).isBetween(startOfWeek, endOfWeek, null, '[]'));
+            weeklyPlan.sort((a,b) => dayjs(a.date).diff(dayjs(b.date)));
+
+            if (weeklyPlan.length === 0) {
+                weeklyPlanListEl.innerHTML = `<div class="text-center text-gray-500 p-4">No plan for this week.</div>`; return;
+            }
+            weeklyPlanListEl.innerHTML = weeklyPlan.map(run => {
+                const isRun = run.type.toLowerCase().includes('run') || run.type.toLowerCase().includes('race');
+                const workoutDetails = isRun ? `${run.distance.toFixed(1)} km at effort ${run.effort}` : (run.notes || 'Activity');
+                return `
+                <div class="planned-run-item p-3 rounded-lg border flex items-center gap-4 ${getWorkoutClass(run)}" draggable="true" data-id="${run.id}" data-completed="${run.completed}">
+                    <i class="fas ${run.completed ? 'fa-check-circle text-green-500' : 'fa-circle text-gray-300'} fa-lg"></i>
+                    <div class="flex-grow">
+                        <p class="font-semibold run-type">${run.type}</p>
+                        <p class="text-sm text-gray-500">${workoutDetails} on ${dayjs(run.date).format('ddd')}</p>
+                    </div>
+                </div>`;
+            }).join('');
+        }
+        
+        function renderRecentActivity(runs) {
+             const runsToShow = state.isHistoryExpanded ? runs : runs.slice(0, 3);
+             document.getElementById('toggle-history-btn').textContent = state.isHistoryExpanded ? 'Show Less' : 'Show All';
+             if (runs.length === 0) {
+                recentRunListEl.innerHTML = `<div class="text-center py-5 text-gray-500">Log your first run to see it here!</div>`; return;
+             }
+             recentRunListEl.innerHTML = runsToShow.map(run => {
+                const pace = run.distance > 0 ? (run.time / run.distance).toFixed(2) : 0;
+                return `
+                    <div class="bg-white p-3 rounded-lg border flex justify-between items-center">
+                        <div>
+                            <p class="font-semibold">${dayjs(run.date).format('ddd, MMM D')}</p>
+                            <p class="text-sm text-gray-500">${run.distance} km • ${pace} min/km</p>
+                        </div>
+                        <div class="flex items-center gap-3">
+                            <button class="edit-run-btn text-gray-400 hover:text-blue-600" data-id="${run.id}"><i class="fas fa-pencil-alt"></i></button>
+                            <button class="delete-run-btn text-gray-400 hover:text-red-600" data-id="${run.id}"><i class="fas fa-trash-alt"></i></button>
+                        </div>
+                    </div>`;
+            }).join('');
+        }
+
+        function renderRunList(runs) {
+            if (runs.length === 0) {
+                runListEl.innerHTML = `<div class="text-center py-10"><i class="fas fa-running fa-3x text-gray-300"></i><p class="mt-4 text-gray-500">No runs logged yet.</p></div>`;
+                return;
+            }
+            runListEl.innerHTML = runs.map(run => {
+                const pace = run.distance > 0 ? (run.time / run.distance).toFixed(2) : 0;
+                return `
+                    <div class="bg-white p-4 rounded-xl border border-gray-200 flex justify-between items-center">
+                        <div>
+                            <p class="font-bold">${dayjs(run.date).format('dddd, MMMM D')}</p>
+                            <p class="text-sm text-gray-500">${run.distance} km • ${run.time} min • ${pace} min/km • Effort ${run.effort}</p>
+                        </div>
+                        <div class="flex items-center gap-3">
+                            <button class="edit-run-btn text-gray-400 hover:text-blue-600" data-id="${run.id}"><i class="fas fa-pencil-alt"></i></button>
+                            <button class="delete-run-btn text-gray-400 hover:text-red-600" data-id="${run.id}"><i class="fas fa-trash-alt"></i></button>
+                        </div>
+                    </div>`;
+            }).join('');
+        }
+
+        function initCharts() {
+            Chart.defaults.font.family = 'Inter';
+            const commonOptions = { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } };
+            const chartConfigs = [
+                { id: 'mileageChart', type: 'bar', options: { ...commonOptions, scales: { y: { beginAtZero: true } } } },
+                { id: 'paceChart', type: 'line', options: { ...commonOptions, scales: { y: { reverse: true, ticks: { callback: (value) => `${value.toFixed(2)}` } } } } },
+            ];
+            chartConfigs.forEach(config => {
+                const canvas = document.getElementById(config.id);
+                if (canvas) { charts[config.id] = new Chart(canvas, { type: config.type, data: { datasets: [] }, options: config.options }); }
+            });
+        }
+
+        function updateCharts(runs) {
+             if (!charts.mileageChart) return;
+            const weeklyData = {};
+            runs.forEach(run => {
+                const weekId = `${dayjs(run.date).isoWeekYear()}-W${String(dayjs(run.date).isoWeek()).padStart(2, '0')}`;
+                weeklyData[weekId] = (weeklyData[weekId] || 0) + run.distance;
+            });
+            const last8Weeks = Object.keys(weeklyData).sort().slice(-8);
+            charts.mileageChart.data = { labels: last8Weeks.map(w => w.replace('-W', ' Wk ')), datasets: [{ data: last8Weeks.map(w => weeklyData[w]), backgroundColor: '#60a5fa', borderRadius: 6 }] };
+            const last15Runs = runs.slice(0, 15).reverse();
+            charts.paceChart.data = { labels: last15Runs.map(r => dayjs(r.date).format('M/D')), datasets: [{ data: last15Runs.map(r => r.distance > 0 ? r.time / r.distance : 0), borderColor: '#818cf8', tension: 0.3, pointBackgroundColor: '#818cf8' }] };
+            Object.values(charts).forEach(chart => { if(chart) chart.update() });
+        }
+        
+        function renderPlanCalendar() {
+            const calendarEl = document.getElementById('plan-calendar');
+            const planRunsByDate = state.planRuns.reduce((acc, run) => { (acc[run.date] = acc[run.date] || []).push(run); return acc; }, {});
+            let calendarHtml = '';
+            const startMonth = dayjs(state.planRuns[0].date).startOf('month');
+            const endMonth = dayjs(state.planRuns[state.planRuns.length - 1].date).startOf('month');
+            let currentMonth = startMonth;
+            while(!currentMonth.isAfter(endMonth)) {
+                calendarHtml += `<div class="month-container mb-8"><h3 class="text-lg font-bold mb-3">${currentMonth.format('MMMMYYYY')}</h3><div class="calendar-grid grid gap-1 text-center text-xs font-semibold text-gray-500 mb-1"><div>S</div><div>M</div><div>T</div><div>W</div><div>T</div><div>F</div><div>S</div></div><div class="calendar-grid grid gap-1">`;
+                const daysInMonth = currentMonth.daysInMonth();
+                const firstDayOfMonth = currentMonth.startOf('month').day();
+                for (let i = 0; i < firstDayOfMonth; i++) calendarHtml += `<div></div>`;
+                for (let day = 1; day <= daysInMonth; day++) {
+                    const date = currentMonth.date(day);
+                    const dateStr = date.format('YYYY-MM-DD');
+                    const runsForDay = planRunsByDate[dateStr] || [];
+                    let dayContent = `<div class="font-semibold text-gray-700">${day}</div>`;
+                    dayContent += runsForDay.map(run => {
+                        const isRun = run.type.toLowerCase().includes('run') || run.type.toLowerCase().includes('race');
+                        return `<div class="calendar-day-run text-xs p-1 mt-1 rounded border ${getWorkoutClass(run)}" draggable="true" data-run-id="${run.id}">${run.type} ${isRun ? run.distance.toFixed(1)+'km' : ''}</div>`
+                    }).join('');
+                    calendarHtml += `<div class="calendar-day-cell bg-gray-50 rounded p-1 text-left" data-date="${dateStr}">${dayContent}</div>`;
+                }
+                calendarHtml += `</div></div>`;
+                currentMonth = currentMonth.add(1, 'month');
+            }
+            calendarEl.innerHTML = calendarHtml;
+        }
+        
+        function setupEventListeners() {
+            tabBarItems.forEach(tab => tab.addEventListener('click', () => switchView(tab.dataset.view) ));
+            addRunBtn.addEventListener('click', () => openModal());
+            cancelBtn.addEventListener('click', () => runModal.classList.add('hidden'));
+            saveBtn.addEventListener('click', () => { if (runForm.checkValidity()) saveRun(); });
+            effortSlider.addEventListener('input', (e) => effortValueSpan.textContent = e.target.value);
+            document.getElementById('toggle-history-btn').addEventListener('click', () => {
+                state.isHistoryExpanded = !state.isHistoryExpanded;
+                render();
+            });
+            document.addEventListener('click', e => {
+                 if (e.target.closest('.edit-run-btn')) openModal(e.target.closest('.edit-run-btn').dataset.id);
+                 if (e.target.closest('.delete-run-btn')) openDeleteModal(e.target.closest('.delete-run-btn').dataset.id);
+            });
+            cancelDeleteBtn.addEventListener('click', () => deleteModal.classList.add('hidden'));
+            confirmDeleteBtn.addEventListener('click', deleteRun);
+            setupCalendarDragAndDrop();
+            setupWeeklyPlanDragAndDrop();
+        }
+
+        function setupCalendarDragAndDrop() {
+            const calendarEl = document.getElementById('plan-calendar'); let draggedItemId = null;
+            calendarEl.addEventListener('dragstart', e => { if (e.target.matches('.calendar-day-run')) { draggedItemId = e.target.dataset.runId; e.dataTransfer.effectAllowed = 'move'; setTimeout(() => e.target.classList.add('dragging'), 0); } });
+            calendarEl.addEventListener('dragend', e => { if(draggedItemId) { document.querySelector(`[data-run-id="${draggedItemId}"]`)?.classList.remove('dragging'); } });
+            calendarEl.addEventListener('dragover', e => { e.preventDefault(); const targetCell = e.target.closest('.calendar-day-cell'); if (targetCell) { document.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over')); targetCell.classList.add('drag-over'); } });
+            calendarEl.addEventListener('dragleave', e => e.target.closest('.calendar-day-cell')?.classList.remove('drag-over'));
+            calendarEl.addEventListener('drop', e => { e.preventDefault(); document.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over')); const targetCell = e.target.closest('.calendar-day-cell'); if (targetCell && draggedItemId) { const newDate = targetCell.dataset.date; const runToMove = state.planRuns.find(r => r.id === draggedItemId); if (runToMove) { runToMove.date = newDate; savePlanRuns(); render(); } draggedItemId = null; } });
+        }
+        
+        function setupWeeklyPlanDragAndDrop() {
+            let draggedItemId = null;
+            weeklyPlanListEl.addEventListener('dragstart', e => { if (e.target.classList.contains('planned-run-item')) { draggedItemId = e.target.dataset.id; e.dataTransfer.effectAllowed = 'move'; setTimeout(() => e.target.classList.add('dragging'), 0); } });
+            weeklyPlanListEl.addEventListener('dragend', e => { if(draggedItemId) { document.querySelector(`.planned-run-item[data-id="${draggedItemId}"]`)?.classList.remove('dragging'); } });
+            weeklyPlanListEl.addEventListener('dragover', e => { e.preventDefault(); const targetItem = e.target.closest('.planned-run-item'); if (targetItem) { document.querySelectorAll('.planned-run-item.drag-over').forEach(el => el.classList.remove('drag-over')); targetItem.classList.add('drag-over'); } });
+            weeklyPlanListEl.addEventListener('dragleave', e => e.target.closest('.planned-run-item')?.classList.remove('drag-over'));
+            weeklyPlanListEl.addEventListener('drop', e => { e.preventDefault(); document.querySelectorAll('.planned-run-item.drag-over').forEach(el => el.classList.remove('drag-over')); const targetItem = e.target.closest('.planned-run-item'); if (targetItem && draggedItemId && targetItem.dataset.id !== draggedItemId) { const draggedRun = state.planRuns.find(r => r.id === draggedItemId); const targetRun = state.planRuns.find(r => r.id === targetItem.dataset.id); if (draggedRun && targetRun) { const tempDate = draggedRun.date; draggedRun.date = targetRun.date; targetRun.date = tempDate; savePlanRuns(); render(); } } draggedItemId = null; });
+        }
+        
+        function openModal(runId = null) {
+            runForm.reset(); const linkSection = document.getElementById('link-plan-section'); runIdInput.value = runId || '';
+            if (runId) { // Editing
+                modalTitleEl.textContent = "Edit Run"; const runToEdit = state.loggedRuns.find(r => r.id === runId);
+                runForm.date.value = runToEdit.date; runForm.distance.value = runToEdit.distance; runForm.time.value = runToEdit.time; runForm.effort.value = runToEdit.effort; effortValueSpan.textContent = runToEdit.effort; linkSection.style.display = 'none';
+            } else { // Adding
+                modalTitleEl.textContent = "Log a New Run"; runForm.date.value = dayjs().format('YYYY-MM-DD'); effortValueSpan.textContent = '5';
+                const now = dayjs(); const startOfWeek = now.startOf('isoWeek'); const endOfWeek = now.endOf('isoWeek');
+                const weeklyPlan = state.planRuns.filter(run => dayjs(run.date).isBetween(startOfWeek, endOfWeek, null, '[]'));
+                const uncompletedRuns = weeklyPlan.filter(r => !r.completed && r.type !== 'Rest' && r.type !== 'Cross-Train');
+                const availableRunsEl = document.getElementById('available-planned-runs');
+                if (uncompletedRuns.length > 0) {
+                    availableRunsEl.innerHTML = uncompletedRuns.map(run => `<label class="flex items-center p-3 bg-gray-100 rounded-lg hover:bg-gray-200 cursor-pointer"><input type="radio" name="linkedRun" value="${run.id}" class="h-4 w-4 text-blue-600"><span class="ml-3 text-sm font-medium">${run.type} - ${run.distance.toFixed(1)} km</span></label>`).join('');
+                    linkSection.style.display = 'block';
+                } else { linkSection.style.display = 'none'; }
+            }
+            runModal.classList.remove('hidden');
+        }
+        
+        function openDeleteModal(runId) { runIdToDelete = runId; deleteModal.classList.remove('hidden'); }
+        
+        function deleteRun() {
+            const runToDelete = state.loggedRuns.find(r => r.id === runIdToDelete);
+            if (runToDelete && runToDelete.linkedPlanId) {
+                const planRun = state.planRuns.find(r => r.id === runToDelete.linkedPlanId);
+                if (planRun) planRun.completed = false;
+            }
+            state.loggedRuns = state.loggedRuns.filter(r => r.id !== runIdToDelete);
+            saveLoggedRuns(); savePlanRuns(); render(); deleteModal.classList.add('hidden'); runIdToDelete = null;
+        }
+
+        function saveRun() {
+            const runId = runIdInput.value;
+            const runData = { date: runForm.date.value, distance: parseFloat(runForm.distance.value), time: parseFloat(runForm.time.value), effort: parseInt(runForm.effort.value) };
+            if (runId) {
+                const index = state.loggedRuns.findIndex(r => r.id === runId); state.loggedRuns[index] = { ...state.loggedRuns[index], ...runData };
+            } else {
+                const newRun = { ...runData, id: `logged-${Date.now()}`, linkedPlanId: runForm.querySelector('input[name="linkedRun"]:checked')?.value || null };
+                state.loggedRuns.push(newRun);
+                if (newRun.linkedPlanId) {
+                    const planRun = state.planRuns.find(r => r.id === newRun.linkedPlanId);
+                    if (planRun) {
+                        planRun.completed = true;
+                        setTimeout(() => { const planRunEl = document.querySelector(`.planned-run-item[data-id="${planRun.id}"]`); planRunEl?.classList.add('run-completed-animation'); planRunEl?.addEventListener('animationend', () => planRunEl.classList.remove('run-completed-animation'), {once: true}); }, 100);
+                    }
+                }
+            }
+            saveLoggedRuns(); savePlanRuns(); render(); runModal.classList.add('hidden');
+        }
+
+        function init() {
+            loadState(); render(); initCharts(); setupEventListeners();
+            setTimeout(() => {
+                state.isLoading = false;
+                document.querySelectorAll('.skeleton-loader').forEach(el => el.style.display = 'none');
+                document.querySelectorAll('.chart-container canvas').forEach(el => { el.style.transition = 'opacity 0.5s'; el.style.opacity = 1; });
+                render(); 
+            }, 500);
+        }
+        
+        init();
+    </script>
+</body>
+</html>
