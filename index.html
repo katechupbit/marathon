@@ -67,15 +67,12 @@
 <body class="bg-slate-50 text-gray-800 h-full">
 
     <div id="app" class="main-container bg-white h-full flex flex-col">
-        <!-- Header -->
         <header class="p-4 border-b border-gray-200 sticky top-0 bg-white/95 backdrop-blur-sm z-10">
             <h1 id="headerTitle" class="text-2xl font-bold text-gray-900">Training Dashboard</h1>
             <p id="countdown" class="text-sm text-gray-500"></p>
         </header>
 
-        <!-- Main Content Area -->
         <main class="flex-grow overflow-y-auto">
-            <!-- Dashboard View -->
             <div id="dashboard-view" class="view active p-4 md:p-6 space-y-6">
                  <section id="today-focus-card" class="bg-gray-100 rounded-lg p-4 shadow-sm"></section>
                  <section id="quick-stats-grid" class="grid grid-cols-3 gap-4"></section>
@@ -99,12 +96,10 @@
                 </section>
             </div>
 
-            <!-- Plan View -->
             <div id="plan-view" class="view view-hidden p-4 md:p-6 space-y-6">
                 <div id="plan-calendar" class="space-y-8"></div>
             </div>
 
-            <!-- History View -->
             <div id="history-view" class="view view-hidden p-4 md:p-6 space-y-4">
                 <div class="flex justify-between items-center">
                      <h2 class="text-xl font-bold">Full History</h2>
@@ -113,7 +108,6 @@
             </div>
         </main>
 
-        <!-- Add Button & Tab Bar -->
         <button id="addRunBtn" class="fixed bottom-20 right-6 bg-blue-600 text-white w-14 h-14 rounded-full flex items-center justify-center shadow-lg active:scale-95 transition-all"><i class="fas fa-plus fa-lg"></i></button>
         <nav class="w-full bg-white/95 backdrop-blur-sm border-t border-gray-200 flex justify-around p-2 sticky bottom-0">
             <button class="tab-bar-item active flex-1 flex flex-col items-center p-2 rounded-lg" data-view="dashboard-view"><i class="fas fa-tachometer-alt fa-lg"></i></button>
@@ -122,10 +116,8 @@
         </nav>
     </div>
 
-    <!-- Add/Edit Run Modal -->
     <div id="runModal" class="fixed inset-0 z-50 hidden"> <div class="modal-bg absolute inset-0 bg-black/40"></div> <div class="modal-content relative bg-white rounded-t-2xl mt-12 p-6 h-full flex flex-col"> <div class="flex-grow overflow-y-auto"> <h2 id="modalTitle" class="text-2xl font-bold mb-6">Log Run</h2> <form id="runForm" class="space-y-5"> <input type="hidden" id="runId"> <div> <label for="date" class="block text-sm font-medium text-gray-600 mb-1">Date</label> <input type="date" id="date" name="date" class="w-full bg-gray-100 border-transparent rounded-lg p-3" required> </div> <div> <label for="distance" class="block text-sm font-medium text-gray-600 mb-1">Distance (km)</label> <input type="number" id="distance" name="distance" step="0.01" min="0" class="w-full bg-gray-100 border-transparent rounded-lg p-3" required> </div> <div> <label for="time" class="block text-sm font-medium text-gray-600 mb-1">Time (minutes)</label> <input type="number" id="time" name="time" min="0" class="w-full bg-gray-100 border-transparent rounded-lg p-3" required> </div> <div> <label for="effort" class="block text-sm font-medium text-gray-600 mb-1">Effort (<span id="effortValue">5</span>/10)</label> <input type="range" id="effort" name="effort" min="1" max="10" value="5" class="w-full bg-gray-200 rounded-lg"> </div> <hr/> <div id="link-plan-section" class="space-y-2"> <label class="block text-sm font-medium text-gray-600">Link to a planned run (optional)</label> <div id="available-planned-runs" class="space-y-2"></div> </div> </form> </div> <div class="grid grid-cols-2 gap-3 pt-4 border-t border-gray-200"> <button type="button" id="cancelBtn" class="w-full p-3 bg-gray-200 font-semibold rounded-lg">Cancel</button> <button type="button" id="saveBtn" class="w-full p-3 bg-blue-600 text-white font-semibold rounded-lg">Save</button> </div> </div> </div>
 
-    <!-- Delete Confirmation Modal -->
     <div id="deleteModal" class="fixed inset-0 z-50 hidden"> <div class="modal-bg absolute inset-0 bg-black/40"></div> <div class="modal-content relative bg-white rounded-xl p-6 w-11/12 max-w-sm mx-auto top-1/3"> <h2 class="text-xl font-bold mb-4">Confirm Deletion</h2> <p class="text-gray-600 mb-6">Are you sure you want to permanently delete this run?</p> <div class="grid grid-cols-2 gap-3"> <button type="button" id="cancelDeleteBtn" class="w-full p-3 bg-gray-200 font-semibold rounded-lg">Cancel</button> <button type="button" id="confirmDeleteBtn" class="w-full p-3 bg-red-600 text-white font-semibold rounded-lg">Delete</button> </div> </div> </div>
     
     <script type="module">
@@ -248,11 +240,22 @@
             return '';
         }
         
-        function getWorkoutIcon(run) {
-             if (run.completed) return 'fa-check-circle text-green-500';
-             if (run.type === 'Cross-Train') return 'fa-bicycle text-yellow-500';
-             if (run.type.toLowerCase().includes('run') || run.type.toLowerCase().includes('race')) return 'fa-shoe-prints text-blue-500';
-             return 'fa-circle text-gray-300';
+        function getTodaysChallenge(type) {
+            const easyChallenges = ["Try to notice something new on your route.", "Smile at 5 people you pass.", "Focus on your breathing for the first kilometer."];
+            const longRunChallenges = ["Dedicate each kilometer to someone important.", "Try a new running podcast or playlist.", "Practice your race day nutrition/hydration."];
+            const speedChallenges = ["Push a little harder on the last interval.", "Focus on a powerful arm swing.", "Visualize crossing the finish line strong."];
+            const crossTrainChallenges = ["Try a 5-minute deep stretch session afterwards.", "Add one new core exercise to your routine."];
+            const defaultChallenges = ["Have fun out there!", "Remember why you started.", "You're stronger than you think!"];
+
+            let challenges;
+            const lowerType = type.toLowerCase();
+            if (lowerType.includes('long')) challenges = longRunChallenges;
+            else if (lowerType.includes('easy')) challenges = easyChallenges;
+            else if (lowerType.includes('speed') || lowerType.includes('tempo') || lowerType.includes('fartlek') || lowerType.includes('strides')) challenges = speedChallenges;
+            else if (lowerType.includes('cross-train')) challenges = crossTrainChallenges;
+            else challenges = defaultChallenges;
+            
+            return challenges[Math.floor(Math.random() * challenges.length)];
         }
 
         function renderTodaysFocus() {
@@ -260,24 +263,25 @@
             const todaysWorkouts = state.planRuns.filter(r => r.date === today);
             const focusCard = document.getElementById('today-focus-card');
             
-            const quotes = ["The miracle isn't that I finished. The miracle is that I had the courage to start.", "Every run is a work of art, a drawing on the canvas of body and soul.", "Pain is temporary. Quitting lasts forever."];
-            const gear = { cool: "Jacket and tights", warm: "Shorts and a t-shirt", hot: "Lightest gear you have!" };
-
+            const quotes = ["The miracle isn't that I finished. The miracle is that I had the courage to start.", "Every run is a work of art.", "Pain is temporary. Quitting lasts forever."];
+            
             let content;
             if (todaysWorkouts.length > 0) {
                 const workout = todaysWorkouts[0];
                 const isRun = workout.type.toLowerCase().includes('run') || workout.type.toLowerCase().includes('race');
                 const details = isRun ? `${workout.distance.toFixed(1)} km` : workout.notes;
+                const challenge = getTodaysChallenge(workout.type);
+
                 content = `
                     <p class="text-sm font-medium text-gray-500">Today's Focus</p>
                     <p class="text-2xl font-bold mt-1">${workout.type}</p>
                     <p class="text-lg text-gray-700">${details}</p>
-                    <div class="text-sm text-gray-500 mt-4 pt-4 border-t border-gray-200">
-                       <p><i class="fas fa-tshirt fa-fw mr-2"></i>Gear: ${gear.warm}</p>
-                       <p class="mt-1"><i class="fas fa-quote-left fa-fw mr-2"></i>${quotes[Math.floor(Math.random() * quotes.length)]}</p>
+                    <div class="text-sm text-gray-500 mt-4 pt-4 border-t border-gray-200 space-y-2">
+                       <p><i class="fas fa-star fa-fw mr-2 text-yellow-500"></i>Mini-Challenge: ${challenge}</p>
+                       <p><i class="fas fa-quote-left fa-fw mr-2"></i>${quotes[Math.floor(Math.random() * quotes.length)]}</p>
                     </div>`;
             } else {
-                 content = `<p class="text-lg font-bold text-gray-700">Rest Day! Take it easy.</p>`;
+                 content = `<p class="text-lg font-bold text-gray-700">Rest Day! Take it easy.</p><p class="text-sm text-gray-500 mt-2">${quotes[Math.floor(Math.random() * quotes.length)]}</p>`;
             }
             focusCard.innerHTML = content;
         }
