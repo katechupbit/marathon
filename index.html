@@ -65,16 +65,6 @@
             animation: shimmer 1.5s infinite;
         }
         @keyframes shimmer { 0% { left: -150%; } 100% { left: 150%; } }
-        
-        /* For mobile touch drag clone */
-        .ghost-drag-item {
-            position: fixed;
-            pointer-events: none;
-            z-index: 1000;
-            opacity: 0.8;
-            transform: scale(1.05);
-            box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
-        }
     </style>
 </head>
 <body class="bg-slate-50 text-gray-800 h-full">
@@ -131,6 +121,7 @@
         </nav>
     </div>
 
+    <!-- Add/Edit Run Modal -->
     <div id="runModal" class="fixed inset-0 z-50 hidden flex items-center justify-center p-4">
         <div class="modal-bg absolute inset-0 bg-black/40" id="modal-bg-close"></div>
         <div class="modal-content relative bg-white rounded-xl w-full max-w-md mx-auto flex flex-col">
@@ -177,8 +168,8 @@
         dayjs.extend(window.dayjs_plugin_isBetween);
         dayjs.extend(window.dayjs_plugin_isSameOrAfter);
 
-        const LOGGED_RUNS_KEY = 'marathon_logged_runs_v13_km';
-        const PLAN_RUNS_KEY = 'marathon_plan_runs_v13_km';
+        const LOGGED_RUNS_KEY = 'marathon_logged_runs_v12_km';
+        const PLAN_RUNS_KEY = 'marathon_plan_runs_v12_km';
         const MILE_TO_KM = 1.60934;
 
         let state = { loggedRuns: [], planRuns: [], activeView: 'dashboard-view', isLoading: true, isHistoryExpanded: false };
@@ -486,7 +477,6 @@
             cancelBtn.addEventListener('click', () => runModal.classList.add('hidden'));
             saveBtn.addEventListener('click', () => { if (runForm.checkValidity()) saveRun(); });
             effortSlider.addEventListener('input', (e) => effortValueSpan.textContent = e.target.value);
-            
             document.addEventListener('click', e => {
                  if (e.target.closest('.edit-run-btn')) openModal(e.target.closest('.edit-run-btn').dataset.id);
                  if (e.target.closest('.delete-run-btn')) openDeleteModal(e.target.closest('.delete-run-btn').dataset.id);
@@ -495,112 +485,28 @@
                     render();
                  }
             });
-            
             cancelDeleteBtn.addEventListener('click', () => deleteModal.classList.add('hidden'));
             confirmDeleteBtn.addEventListener('click', deleteRun);
-            
-            setupDragAndDrop();
+            setupCalendarDragAndDrop();
+            setupWeeklyPlanDragAndDrop();
         }
 
-        function setupDragAndDrop() {
-            const containers = [document.getElementById('plan-calendar'), document.getElementById('weeklyPlanList')];
+        function setupCalendarDragAndDrop() {
+            const calendarEl = document.getElementById('plan-calendar'); let draggedItemId = null;
+            calendarEl.addEventListener('dragstart', e => { if (e.target.matches('.calendar-day-run')) { draggedItemId = e.target.dataset.runId; e.dataTransfer.effectAllowed = 'move'; setTimeout(() => e.target.classList.add('dragging'), 0); } });
+            calendarEl.addEventListener('dragend', e => { if(draggedItemId) { document.querySelector(`[data-run-id="${draggedItemId}"]`)?.classList.remove('dragging'); } });
+            calendarEl.addEventListener('dragover', e => { e.preventDefault(); const targetCell = e.target.closest('.calendar-day-cell'); if (targetCell) { document.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over')); targetCell.classList.add('drag-over'); } });
+            calendarEl.addEventListener('dragleave', e => e.target.closest('.calendar-day-cell')?.classList.remove('drag-over'));
+            calendarEl.addEventListener('drop', e => { e.preventDefault(); document.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over')); const targetCell = e.target.closest('.calendar-day-cell'); if (targetCell && draggedItemId) { const newDate = targetCell.dataset.date; const runToMove = state.planRuns.find(r => r.id === draggedItemId); if (runToMove) { runToMove.date = newDate; savePlanRuns(); render(); } draggedItemId = null; } });
+        }
+        
+        function setupWeeklyPlanDragAndDrop() {
             let draggedItemId = null;
-            let dragGhost = null;
-
-            const handleTouchStart = e => {
-                const target = e.target.closest('[draggable="true"]');
-                if (!target) return;
-                
-                draggedItemId = target.dataset.id || target.dataset.runId;
-                target.classList.add('dragging');
-
-                dragGhost = target.cloneNode(true);
-                dragGhost.classList.add('ghost-drag-item');
-                document.body.appendChild(dragGhost);
-                
-                const touch = e.touches[0];
-                positionGhost(touch);
-            };
-
-            const handleTouchMove = e => {
-                if (!draggedItemId) return;
-                e.preventDefault();
-                const touch = e.touches[0];
-                positionGhost(touch);
-                
-                document.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
-                const dropTarget = document.elementFromPoint(touch.clientX, touch.clientY);
-                const dropCell = dropTarget?.closest('.calendar-day-cell, .planned-run-item');
-                if(dropCell) dropCell.classList.add('drag-over');
-            };
-
-            const handleTouchEnd = e => {
-                if (!draggedItemId) return;
-
-                const dropTarget = document.querySelector('.drag-over');
-                if (dropTarget) {
-                    dropTarget.classList.remove('drag-over');
-                    handleDrop(draggedItemId, dropTarget);
-                }
-
-                document.querySelector('.dragging')?.classList.remove('dragging');
-                dragGhost?.remove();
-                dragGhost = null;
-                draggedItemId = null;
-            };
-            
-            const positionGhost = (touch) => {
-                if (!dragGhost) return;
-                dragGhost.style.left = `${touch.clientX - dragGhost.offsetWidth / 2}px`;
-                dragGhost.style.top = `${touch.clientY - dragGhost.offsetHeight / 2}px`;
-            };
-
-            const handleDrop = (draggedId, dropTarget) => {
-                const runToMove = state.planRuns.find(r => r.id === draggedId);
-                if (!runToMove) return;
-
-                if (dropTarget.classList.contains('calendar-day-cell')) {
-                    runToMove.date = dropTarget.dataset.date;
-                } else if (dropTarget.classList.contains('planned-run-item')) {
-                    const targetRun = state.planRuns.find(r => r.id === dropTarget.dataset.id);
-                    if (targetRun && targetRun.id !== runToMove.id) {
-                        const tempDate = runToMove.date;
-                        runToMove.date = targetRun.date;
-                        targetRun.date = tempDate;
-                    }
-                }
-                savePlanRuns();
-                render();
-            };
-
-            containers.forEach(container => {
-                // MOUSE EVENTS (for desktop)
-                container.addEventListener('dragstart', e => { 
-                    const target = e.target.closest('[draggable="true"]');
-                    if(target) {
-                        draggedItemId = target.dataset.id || target.dataset.runId;
-                        e.dataTransfer.effectAllowed = 'move';
-                        setTimeout(() => target.classList.add('dragging'), 0);
-                    }
-                });
-                container.addEventListener('dragend', e => e.target.closest('.dragging')?.classList.remove('dragging'));
-                container.addEventListener('dragover', e => { e.preventDefault(); const target = e.target.closest('.calendar-day-cell, .planned-run-item'); if(target) target.classList.add('drag-over'); });
-                container.addEventListener('dragleave', e => e.target.closest('.drag-over')?.classList.remove('drag-over'));
-                container.addEventListener('drop', e => {
-                    e.preventDefault();
-                    const dropTarget = e.target.closest('.drag-over');
-                    if (dropTarget) {
-                        dropTarget.classList.remove('drag-over');
-                        handleDrop(draggedItemId, dropTarget);
-                    }
-                    draggedItemId = null;
-                });
-
-                // TOUCH EVENTS (for mobile)
-                container.addEventListener('touchstart', handleTouchStart, { passive: false });
-                container.addEventListener('touchmove', handleTouchMove, { passive: false });
-                container.addEventListener('touchend', handleTouchEnd);
-            });
+            weeklyPlanListEl.addEventListener('dragstart', e => { if (e.target.classList.contains('planned-run-item')) { draggedItemId = e.target.dataset.id; e.dataTransfer.effectAllowed = 'move'; setTimeout(() => e.target.classList.add('dragging'), 0); } });
+            weeklyPlanListEl.addEventListener('dragend', e => { if(draggedItemId) { document.querySelector(`.planned-run-item[data-id="${draggedItemId}"]`)?.classList.remove('dragging'); } });
+            weeklyPlanListEl.addEventListener('dragover', e => { e.preventDefault(); const targetItem = e.target.closest('.planned-run-item'); if (targetItem) { document.querySelectorAll('.planned-run-item.drag-over').forEach(el => el.classList.remove('drag-over')); targetItem.classList.add('drag-over'); } });
+            weeklyPlanListEl.addEventListener('dragleave', e => e.target.closest('.planned-run-item')?.classList.remove('drag-over'));
+            weeklyPlanListEl.addEventListener('drop', e => { e.preventDefault(); document.querySelectorAll('.planned-run-item.drag-over').forEach(el => el.classList.remove('drag-over')); const targetItem = e.target.closest('.planned-run-item'); if (targetItem && draggedItemId && targetItem.dataset.id !== draggedItemId) { const draggedRun = state.planRuns.find(r => r.id === draggedItemId); const targetRun = state.planRuns.find(r => r.id === targetItem.dataset.id); if (draggedRun && targetRun) { const tempDate = draggedRun.date; draggedRun.date = targetRun.date; targetRun.date = tempDate; savePlanRuns(); render(); } } draggedItemId = null; });
         }
         
         function openModal(runId = null) {
