@@ -163,18 +163,26 @@
     <div id="deleteModal" class="fixed inset-0 z-50 hidden flex items-center justify-center p-4"> <div class="modal-bg absolute inset-0 bg-black/40"></div> <div class="modal-content relative bg-white rounded-xl p-6 w-full max-w-sm mx-auto"> <h2 class="text-xl font-bold mb-4">Confirm Deletion</h2> <p class="text-gray-600 mb-6">Are you sure you want to permanently delete this run?</p> <div class="grid grid-cols-2 gap-3"> <button type="button" id="cancelDeleteBtn" class="w-full p-3 bg-gray-200 font-semibold rounded-lg">Cancel</button> <button type="button" id="confirmDeleteBtn" class="w-full p-3 bg-red-600 text-white font-semibold rounded-lg">Delete</button> </div> </div> </div>
     
     <script type="module">
+        // Extend dayjs with necessary plugins for week calculations
         dayjs.extend(window.dayjs_plugin_isoWeek);
         dayjs.extend(window.dayjs_plugin_weekOfYear);
         dayjs.extend(window.dayjs_plugin_isBetween);
         dayjs.extend(window.dayjs_plugin_isSameOrAfter);
 
+        // Constants for localStorage keys and unit conversion
         const LOGGED_RUNS_KEY = 'marathon_logged_runs_v12_km';
         const PLAN_RUNS_KEY = 'marathon_plan_runs_v12_km';
         const MILE_TO_KM = 1.60934;
 
+        // Global application state
         let state = { loggedRuns: [], planRuns: [], activeView: 'dashboard-view', isLoading: true, isHistoryExpanded: false };
         let runIdToDelete = null;
 
+        /**
+         * Generates the initial 37-week training plan leading up to the marathon.
+         * The plan is divided into phases: Base Building, Speed Development, Peak Mileage, and Taper.
+         * @returns {Array} An array of planned workout objects.
+         */
         function getInitialTrainingPlan() {
             const plan = []; let currentDate = dayjs('2025-06-23').startOf('isoWeek'); const raceDate = dayjs('2026-03-08'); let runCounter = 0;
             const addWorkout = (date, type, distance = 0, notes = '') => {
@@ -184,18 +192,25 @@
             let weekNum = 1;
             while(currentDate.isBefore(raceDate)) {
                 const weekStart = currentDate;
+                // Phase 1: Base Building (Weeks 1-10)
                 if (currentDate.isBefore('2025-09-01')) {
                     const phase1Week = weekNum; let easyDist = 2*MILE_TO_KM, longDist = 3*MILE_TO_KM;
                     if (phase1Week >= 3) { easyDist = 3*MILE_TO_KM; longDist = 4*MILE_TO_KM; } if (phase1Week >= 5) { easyDist = 3.5*MILE_TO_KM; longDist = 5*MILE_TO_KM; } if (phase1Week >= 7) { easyDist = 4*MILE_TO_KM; longDist = 6*MILE_TO_KM; } if (phase1Week >= 9) { easyDist = 4*MILE_TO_KM; longDist = 7*MILE_TO_KM; }
                     addWorkout(weekStart.add(1, 'day'), 'Easy Run', easyDist); addWorkout(weekStart.add(3, 'day'), 'Easy Run', easyDist); addWorkout(weekStart.add(4, 'day'), 'Cross-Train', 0, '30-45 mins'); addWorkout(weekStart.add(5, 'day'), 'Long Run', longDist);
-                } else if (currentDate.isBefore('2025-11-01')) {
+                } 
+                // Phase 2: Speed Development (Weeks 11-19)
+                else if (currentDate.isBefore('2025-11-01')) {
                     const phase2Week = weekNum - 10; const longDist = Math.min(12, 7 + phase2Week)*MILE_TO_KM; const midDist = Math.min(7, 5 + phase2Week * 0.5)*MILE_TO_KM;
                     addWorkout(weekStart.add(1, 'day'), 'Easy Run', 4*MILE_TO_KM); addWorkout(weekStart.add(3, 'day'), phase2Week % 2 === 0 ? 'Fartlek' : 'Strides', midDist, 'Speed work'); addWorkout(weekStart.add(5, 'day'), 'Long Run', longDist); addWorkout(weekStart.add(6, 'day'), 'Cross-Train', 0, 'Active Recovery');
-                } else if (currentDate.isBefore('2026-02-01')) {
+                } 
+                // Phase 3: Peak Mileage (Weeks 20-32)
+                else if (currentDate.isBefore('2026-02-01')) {
                     const phase3Week = weekNum - 19; let longDist = 14;
-                    if (phase3Week >= 2) longDist = 15; if (phase3Week >= 4) longDist = 16; if (phase3Week >= 6) longDist = 18; if (phase3Week >= 8) longDist = 20; if (phase3Week >= 10) longDist = 16; if (phase3Week >= 12) longDist = 20;
+                    if (phase3Week >= 2) longDist = 15; if (phase3Week >= 4) longDist = 16; if (phase3Week >= 6) longDist = 18; if (phase3Week >= 8) longDist = 20; if (phase3Week >= 10) longDist = 16; if (phase3Week >= 12) longDist = 20; // Cutback week
                     addWorkout(weekStart.add(1, 'day'), 'Easy Run', 5*MILE_TO_KM); addWorkout(weekStart.add(3, 'day'), 'Tempo Run', 7*MILE_TO_KM, 'Marathon Pace'); addWorkout(weekStart.add(5, 'day'), 'Long Run', longDist * MILE_TO_KM); addWorkout(weekStart.add(6, 'day'), 'Cross-Train', 0, 'Optional');
-                } else {
+                } 
+                // Phase 4: Taper (Weeks 33-37)
+                else {
                     const phase4Week = weekNum - 32; let longDist = 12;
                     if(phase4Week === 2) longDist = 10; if(phase4Week === 3) longDist = 8; if(phase4Week === 4) longDist = 6; if(phase4Week === 5) longDist = 4;
                     if (weekStart.add(6, 'day').isAfter(raceDate.subtract(1, 'week'))) {
@@ -209,17 +224,20 @@
             return plan;
         }
         
+        // --- State Management Functions ---
         function loadState() {
             state.loggedRuns = JSON.parse(localStorage.getItem(LOGGED_RUNS_KEY) || '[]');
             let storedPlan = JSON.parse(localStorage.getItem(PLAN_RUNS_KEY) || 'null');
             if (!storedPlan) { storedPlan = getInitialTrainingPlan(); savePlanRuns(storedPlan); }
             state.planRuns = storedPlan;
+            // Sync completion status from logged runs
             const completedPlanIds = new Set(state.loggedRuns.map(lr => lr.linkedPlanId).filter(Boolean));
             state.planRuns.forEach(pr => { pr.completed = completedPlanIds.has(pr.id); });
         }
         function saveLoggedRuns() { localStorage.setItem(LOGGED_RUNS_KEY, JSON.stringify(state.loggedRuns)); }
         function savePlanRuns(plan = state.planRuns) { localStorage.setItem(PLAN_RUNS_KEY, JSON.stringify(plan)); }
 
+        // --- DOM Element References ---
         const allViews = document.querySelectorAll('.view');
         const tabBarItems = document.querySelectorAll('.tab-bar-item');
         const headerTitleEl = document.getElementById('headerTitle');
@@ -241,6 +259,10 @@
         const runIdInput = document.getElementById('runId');
         let charts = {};
         
+        /**
+         * Switches the visible view in the application.
+         * @param {string} viewId - The ID of the view to display.
+         */
         function switchView(viewId) {
             const currentView = document.querySelector('.view.active');
             const newView = document.getElementById(viewId);
@@ -253,12 +275,17 @@
             render();
         }
 
+        /**
+         * Main render function to update the UI based on the current state.
+         */
         function render() {
             tabBarItems.forEach(t => t.classList.toggle('active', t.dataset.view === state.activeView));
             const titles = { 'dashboard-view': 'Training Dashboard', 'plan-view': '2026 LA Marathon!', 'history-view': 'Run History' };
             headerTitleEl.textContent = titles[state.activeView];
             const sortedRuns = [...state.loggedRuns].sort((a,b) => dayjs(b.date).diff(dayjs(a.date)));
+            
             renderCountdown();
+            
             if (state.activeView === 'dashboard-view') {
                 renderTodaysFocus();
                 renderQuickStats(sortedRuns);
@@ -270,6 +297,7 @@
             if (state.activeView === 'history-view') renderRunList(sortedRuns);
         }
 
+        // --- Rendering Sub-functions ---
         function renderCountdown() {
             const raceDate = dayjs('2026-03-08'); const now = dayjs(); const daysLeft = raceDate.diff(now, 'day');
             countdownEl.textContent = daysLeft >= 0 ? `${daysLeft} days until race day! (March 8, 2026)` : `Congratulations on the race!`;
@@ -352,8 +380,9 @@
             weeklyPlanListEl.innerHTML = weeklyPlan.map(run => {
                 const isRun = run.type.toLowerCase().includes('run') || run.type.toLowerCase().includes('race');
                 const workoutDetails = isRun ? `${run.distance.toFixed(1)} km at effort ${run.effort}` : (run.notes || 'Activity');
+                const isDraggable = !run.completed;
                 return `
-                <div class="planned-run-item p-3 rounded-lg border flex items-center gap-4 ${getWorkoutClass(run)}" draggable="true" data-id="${run.id}" data-completed="${run.completed}">
+                <div class="planned-run-item p-3 rounded-lg border flex items-center gap-4 ${getWorkoutClass(run)}" ${isDraggable ? 'draggable="true"' : ''} data-id="${run.id}" data-completed="${run.completed}">
                     <i class="fas ${run.completed ? 'fa-check-circle text-green-500' : 'fa-circle text-gray-300'} fa-lg"></i>
                     <div class="flex-grow">
                         <p class="font-semibold run-type">${run.type}</p>
@@ -377,7 +406,7 @@
                     <div class="bg-white p-3 rounded-lg border flex justify-between items-center">
                         <div>
                             <p class="font-semibold">${dayjs(run.date).format('ddd, MMM D')}</p>
-                            <p class="text-sm text-gray-500">${run.distance} km • ${pace} min/km</p>
+                            <p class="text-sm text-gray-500">${run.distance.toFixed(1)} km • ${pace} min/km</p>
                         </div>
                         <div class="flex items-center gap-3">
                             <button class="edit-run-btn text-gray-400 hover:text-blue-600" data-id="${run.id}"><i class="fas fa-pencil-alt"></i></button>
@@ -405,7 +434,7 @@
                     <div class="bg-white p-4 rounded-xl border border-gray-200 flex justify-between items-center">
                         <div>
                             <p class="font-bold">${dayjs(run.date).format('dddd, MMMM D')}</p>
-                            <p class="text-sm text-gray-500">${run.distance} km • ${run.time} min • ${pace} min/km • Effort ${run.effort}</p>
+                            <p class="text-sm text-gray-500">${run.distance.toFixed(1)} km • ${run.time} min • ${pace} min/km • Effort ${run.effort}</p>
                         </div>
                         <div class="flex items-center gap-3">
                             <button class="edit-run-btn text-gray-400 hover:text-blue-600" data-id="${run.id}"><i class="fas fa-pencil-alt"></i></button>
@@ -419,8 +448,8 @@
             Chart.defaults.font.family = 'Inter';
             const commonOptions = { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } };
             const chartConfigs = [
-                { id: 'mileageChart', type: 'bar', options: { ...commonOptions, scales: { y: { beginAtZero: true } } } },
-                { id: 'paceChart', type: 'line', options: { ...commonOptions, scales: { y: { reverse: true, ticks: { callback: (value) => `${value.toFixed(2)}` } } } } },
+                { id: 'mileageChart', type: 'bar', options: { ...commonOptions, scales: { y: { beginAtZero: true, title: { display: true, text: 'km' } } } } },
+                { id: 'paceChart', type: 'line', options: { ...commonOptions, scales: { y: { reverse: true, title: { display: true, text: 'min/km' }, ticks: { callback: (value) => `${value.toFixed(2)}` } } } } },
             ];
             chartConfigs.forEach(config => {
                 const canvas = document.getElementById(config.id);
@@ -431,6 +460,7 @@
         function updateCharts(runs) {
              if (!charts.mileageChart) return;
             const weeklyData = {};
+            // Group runs by week ID (e.g., "2025-W26")
             runs.forEach(run => {
                 const weekId = `${dayjs(run.date).isoWeekYear()}-W${String(dayjs(run.date).isoWeek()).padStart(2, '0')}`;
                 weeklyData[weekId] = (weeklyData[weekId] || 0) + run.distance;
@@ -444,16 +474,20 @@
         
         function renderPlanCalendar() {
             const calendarEl = document.getElementById('plan-calendar');
+            // Group plan runs by their date for efficient lookup
             const planRunsByDate = state.planRuns.reduce((acc, run) => { (acc[run.date] = acc[run.date] || []).push(run); return acc; }, {});
             let calendarHtml = '';
+            // Determine the date range of the entire plan
             const startMonth = dayjs(state.planRuns[0].date).startOf('month');
             const endMonth = dayjs(state.planRuns[state.planRuns.length - 1].date).startOf('month');
+            
             let currentMonth = startMonth;
             while(!currentMonth.isAfter(endMonth)) {
-                calendarHtml += `<div class="month-container mb-8"><h3 class="text-lg font-bold mb-3">${currentMonth.format('MMMMYYYY')}</h3><div class="calendar-grid grid gap-1 text-center text-xs font-semibold text-gray-500 mb-1"><div>S</div><div>M</div><div>T</div><div>W</div><div>T</div><div>F</div><div>S</div></div><div class="calendar-grid grid gap-1">`;
+                calendarHtml += `<div class="month-container mb-8"><h3 class="text-lg font-bold mb-3">${currentMonth.format('MMMM YYYY')}</h3><div class="calendar-grid grid gap-1 text-center text-xs font-semibold text-gray-500 mb-1"><div>S</div><div>M</div><div>T</div><div>W</div><div>T</div><div>F</div><div>S</div></div><div class="calendar-grid grid gap-1">`;
                 const daysInMonth = currentMonth.daysInMonth();
                 const firstDayOfMonth = currentMonth.startOf('month').day();
-                for (let i = 0; i < firstDayOfMonth; i++) calendarHtml += `<div></div>`;
+                for (let i = 0; i < firstDayOfMonth; i++) calendarHtml += `<div></div>`; // Blank cells for padding
+                
                 for (let day = 1; day <= daysInMonth; day++) {
                     const date = currentMonth.date(day);
                     const dateStr = date.format('YYYY-MM-DD');
@@ -461,7 +495,8 @@
                     let dayContent = `<div class="font-semibold text-gray-700">${day}</div>`;
                     dayContent += runsForDay.map(run => {
                         const isRun = run.type.toLowerCase().includes('run') || run.type.toLowerCase().includes('race');
-                        return `<div class="calendar-day-run text-xs p-1 mt-1 rounded border ${getWorkoutClass(run)}" draggable="true" data-run-id="${run.id}">${run.type} ${isRun ? run.distance.toFixed(1)+'km' : ''}</div>`
+                        const isDraggable = !run.completed;
+                        return `<div class="calendar-day-run text-xs p-1 mt-1 rounded border ${getWorkoutClass(run)}" ${isDraggable ? 'draggable="true"' : ''} data-run-id="${run.id}">${run.type} ${isRun ? run.distance.toFixed(1)+'km' : ''}</div>`
                     }).join('');
                     calendarHtml += `<div class="calendar-day-cell bg-gray-50 rounded p-1 text-left" data-date="${dateStr}">${dayContent}</div>`;
                 }
@@ -471,12 +506,15 @@
             calendarEl.innerHTML = calendarHtml;
         }
         
+        // --- Event Listener Setup ---
         function setupEventListeners() {
             tabBarItems.forEach(tab => tab.addEventListener('click', () => switchView(tab.dataset.view) ));
             addRunBtn.addEventListener('click', () => openModal());
             cancelBtn.addEventListener('click', () => runModal.classList.add('hidden'));
             saveBtn.addEventListener('click', () => { if (runForm.checkValidity()) saveRun(); });
             effortSlider.addEventListener('input', (e) => effortValueSpan.textContent = e.target.value);
+            
+            // Event delegation for dynamically created buttons
             document.addEventListener('click', e => {
                  if (e.target.closest('.edit-run-btn')) openModal(e.target.closest('.edit-run-btn').dataset.id);
                  if (e.target.closest('.delete-run-btn')) openDeleteModal(e.target.closest('.delete-run-btn').dataset.id);
@@ -485,82 +523,323 @@
                     render();
                  }
             });
+
             cancelDeleteBtn.addEventListener('click', () => deleteModal.classList.add('hidden'));
             confirmDeleteBtn.addEventListener('click', deleteRun);
+            
+            // Initialize drag and drop features
             setupCalendarDragAndDrop();
             setupWeeklyPlanDragAndDrop();
         }
 
+        // --- Drag and Drop Functions ---
+        /**
+         * Sets up drag and drop for the main plan calendar.
+         * Includes support for both mouse (drag) and touch events.
+         */
         function setupCalendarDragAndDrop() {
-            const calendarEl = document.getElementById('plan-calendar'); let draggedItemId = null;
-            calendarEl.addEventListener('dragstart', e => { if (e.target.matches('.calendar-day-run')) { draggedItemId = e.target.dataset.runId; e.dataTransfer.effectAllowed = 'move'; setTimeout(() => e.target.classList.add('dragging'), 0); } });
-            calendarEl.addEventListener('dragend', e => { if(draggedItemId) { document.querySelector(`[data-run-id="${draggedItemId}"]`)?.classList.remove('dragging'); } });
-            calendarEl.addEventListener('dragover', e => { e.preventDefault(); const targetCell = e.target.closest('.calendar-day-cell'); if (targetCell) { document.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over')); targetCell.classList.add('drag-over'); } });
-            calendarEl.addEventListener('dragleave', e => e.target.closest('.calendar-day-cell')?.classList.remove('drag-over'));
-            calendarEl.addEventListener('drop', e => { e.preventDefault(); document.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over')); const targetCell = e.target.closest('.calendar-day-cell'); if (targetCell && draggedItemId) { const newDate = targetCell.dataset.date; const runToMove = state.planRuns.find(r => r.id === draggedItemId); if (runToMove) { runToMove.date = newDate; savePlanRuns(); render(); } draggedItemId = null; } });
+            const calendarEl = document.getElementById('plan-calendar');
+            let draggedItemId = null;
+            let draggedElement = null;
+
+            // --- Desktop Mouse Drag Events ---
+            calendarEl.addEventListener('dragstart', e => {
+                if (e.target.matches('.calendar-day-run') && e.target.draggable) {
+                    draggedItemId = e.target.dataset.runId;
+                    e.dataTransfer.effectAllowed = 'move';
+                    e.dataTransfer.setData('text/plain', draggedItemId);
+                    setTimeout(() => e.target.classList.add('dragging'), 0);
+                }
+            });
+
+            calendarEl.addEventListener('dragend', e => {
+                if (draggedItemId) {
+                    const el = document.querySelector(`.calendar-day-run[data-run-id="${draggedItemId}"]`);
+                    el?.classList.remove('dragging');
+                    draggedItemId = null;
+                }
+            });
+
+            calendarEl.addEventListener('dragover', e => {
+                e.preventDefault();
+                const targetCell = e.target.closest('.calendar-day-cell');
+                if (targetCell) {
+                    document.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
+                    targetCell.classList.add('drag-over');
+                }
+            });
+
+            calendarEl.addEventListener('dragleave', e => {
+                e.target.closest('.calendar-day-cell')?.classList.remove('drag-over');
+            });
+
+            calendarEl.addEventListener('drop', e => {
+                e.preventDefault();
+                document.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
+                const targetCell = e.target.closest('.calendar-day-cell');
+                const droppedRunId = e.dataTransfer.getData('text/plain');
+
+                if (targetCell && droppedRunId) {
+                    const newDate = targetCell.dataset.date;
+                    const runToMove = state.planRuns.find(r => r.id === droppedRunId);
+                    if (runToMove) {
+                        runToMove.date = newDate;
+                        savePlanRuns();
+                        render();
+                    }
+                }
+                draggedItemId = null;
+            });
+
+            // --- Mobile Touch Events ---
+            let lastTouchTarget = null;
+            
+            calendarEl.addEventListener('touchstart', e => {
+                const targetRun = e.target.closest('.calendar-day-run');
+                if (targetRun && targetRun.draggable) {
+                    draggedItemId = targetRun.dataset.runId;
+                    draggedElement = targetRun;
+                }
+            }, { passive: true });
+
+            calendarEl.addEventListener('touchmove', e => {
+                if (!draggedItemId || !draggedElement) return;
+                e.preventDefault(); 
+                
+                draggedElement.classList.add('dragging');
+
+                const touch = e.touches[0];
+                draggedElement.style.visibility = 'hidden';
+                const elementUnderTouch = document.elementFromPoint(touch.clientX, touch.clientY);
+                draggedElement.style.visibility = 'visible';
+
+                const targetCell = elementUnderTouch ? elementUnderTouch.closest('.calendar-day-cell') : null;
+
+                if (lastTouchTarget && lastTouchTarget !== targetCell) {
+                    lastTouchTarget.classList.remove('drag-over');
+                }
+
+                if (targetCell) {
+                    targetCell.classList.add('drag-over');
+                    lastTouchTarget = targetCell;
+                }
+            }, { passive: false });
+
+            calendarEl.addEventListener('touchend', e => {
+                if (!draggedItemId || !draggedElement) return;
+
+                if (lastTouchTarget) {
+                    const newDate = lastTouchTarget.dataset.date;
+                    const runToMove = state.planRuns.find(r => r.id === draggedItemId);
+                    if (runToMove) {
+                        runToMove.date = newDate;
+                        savePlanRuns();
+                    }
+                }
+
+                document.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
+                draggedElement.classList.remove('dragging');
+                draggedItemId = null;
+                draggedElement = null;
+                lastTouchTarget = null;
+
+                setTimeout(render, 50);
+            });
         }
-        
+
+        /**
+         * Sets up drag and drop for the weekly plan list on the dashboard.
+         * Includes support for both mouse (drag) and touch events for swapping items.
+         */
         function setupWeeklyPlanDragAndDrop() {
             let draggedItemId = null;
-            weeklyPlanListEl.addEventListener('dragstart', e => { if (e.target.classList.contains('planned-run-item')) { draggedItemId = e.target.dataset.id; e.dataTransfer.effectAllowed = 'move'; setTimeout(() => e.target.classList.add('dragging'), 0); } });
-            weeklyPlanListEl.addEventListener('dragend', e => { if(draggedItemId) { document.querySelector(`.planned-run-item[data-id="${draggedItemId}"]`)?.classList.remove('dragging'); } });
-            weeklyPlanListEl.addEventListener('dragover', e => { e.preventDefault(); const targetItem = e.target.closest('.planned-run-item'); if (targetItem) { document.querySelectorAll('.planned-run-item.drag-over').forEach(el => el.classList.remove('drag-over')); targetItem.classList.add('drag-over'); } });
-            weeklyPlanListEl.addEventListener('dragleave', e => e.target.closest('.planned-run-item')?.classList.remove('drag-over'));
-            weeklyPlanListEl.addEventListener('drop', e => { e.preventDefault(); document.querySelectorAll('.planned-run-item.drag-over').forEach(el => el.classList.remove('drag-over')); const targetItem = e.target.closest('.planned-run-item'); if (targetItem && draggedItemId && targetItem.dataset.id !== draggedItemId) { const draggedRun = state.planRuns.find(r => r.id === draggedItemId); const targetRun = state.planRuns.find(r => r.id === targetItem.dataset.id); if (draggedRun && targetRun) { const tempDate = draggedRun.date; draggedRun.date = targetRun.date; targetRun.date = tempDate; savePlanRuns(); render(); } } draggedItemId = null; });
+            let draggedElement = null;
+
+            // --- Desktop Mouse Drag Events ---
+            weeklyPlanListEl.addEventListener('dragstart', e => {
+                if (e.target.classList.contains('planned-run-item') && e.target.draggable) {
+                    draggedItemId = e.target.dataset.id;
+                    e.dataTransfer.effectAllowed = 'move';
+                    e.dataTransfer.setData('text/plain', draggedItemId);
+                    setTimeout(() => e.target.classList.add('dragging'), 0);
+                }
+            });
+
+            weeklyPlanListEl.addEventListener('dragend', e => {
+                if (draggedItemId) {
+                    const draggedEl = document.querySelector(`.planned-run-item[data-id="${draggedItemId}"]`);
+                    draggedEl?.classList.remove('dragging');
+                    draggedItemId = null;
+                }
+            });
+            
+            weeklyPlanListEl.addEventListener('dragover', e => {
+                e.preventDefault(); // Necessary to allow dropping
+            });
+
+            weeklyPlanListEl.addEventListener('drop', e => {
+                e.preventDefault();
+                const targetItem = e.target.closest('.planned-run-item');
+                const droppedRunId = e.dataTransfer.getData('text/plain');
+
+                if (targetItem && droppedRunId && targetItem.dataset.id !== droppedRunId) {
+                    const draggedRun = state.planRuns.find(r => r.id === droppedRunId);
+                    const targetRun = state.planRuns.find(r => r.id === targetItem.dataset.id);
+
+                    if (draggedRun && targetRun) {
+                        const tempDate = draggedRun.date;
+                        draggedRun.date = targetRun.date;
+                        targetRun.date = tempDate;
+                        savePlanRuns();
+                        render();
+                    }
+                }
+                draggedItemId = null;
+            });
+
+            // --- Mobile Touch Events ---
+            weeklyPlanListEl.addEventListener('touchstart', e => {
+                const targetRun = e.target.closest('.planned-run-item');
+                if (targetRun && targetRun.draggable) {
+                    draggedItemId = targetRun.dataset.id;
+                    draggedElement = targetRun;
+                }
+            }, { passive: true });
+
+            weeklyPlanListEl.addEventListener('touchmove', e => {
+                 if (!draggedItemId || !draggedElement) return;
+                 e.preventDefault();
+                 draggedElement.classList.add('dragging');
+            }, {passive: false});
+
+            weeklyPlanListEl.addEventListener('touchend', e => {
+                if (!draggedItemId || !draggedElement) return;
+
+                draggedElement.style.visibility = 'hidden';
+                const touch = e.changedTouches[0];
+                const elementUnderTouch = document.elementFromPoint(touch.clientX, touch.clientY);
+                draggedElement.style.visibility = 'visible';
+
+                const targetItem = elementUnderTouch ? elementUnderTouch.closest('.planned-run-item') : null;
+
+                if (targetItem && targetItem.dataset.id !== draggedItemId) {
+                    const draggedRun = state.planRuns.find(r => r.id === draggedItemId);
+                    const targetRun = state.planRuns.find(r => r.id === targetItem.dataset.id);
+
+                    if (draggedRun && targetRun) {
+                        const tempDate = draggedRun.date;
+                        draggedRun.date = targetRun.date;
+                        targetRun.date = tempDate;
+                        savePlanRuns();
+                    }
+                }
+
+                draggedElement.classList.remove('dragging');
+                draggedItemId = null;
+                draggedElement = null;
+
+                setTimeout(render, 50);
+            });
         }
         
+        // --- Modal and Action Functions ---
         function openModal(runId = null) {
-            runForm.reset(); const linkSection = document.getElementById('link-plan-section'); runIdInput.value = runId || '';
-            if (runId) { // Editing
-                modalTitleEl.textContent = "Edit Run"; const runToEdit = state.loggedRuns.find(r => r.id === runId);
-                runForm.date.value = runToEdit.date; runForm.distance.value = runToEdit.distance; runForm.time.value = runToEdit.time; runForm.effort.value = runToEdit.effort; effortValueSpan.textContent = runToEdit.effort; linkSection.style.display = 'none';
-            } else { // Adding
-                modalTitleEl.textContent = "Log a New Run"; runForm.date.value = dayjs().format('YYYY-MM-DD'); effortValueSpan.textContent = '5';
-                const now = dayjs(); const startOfWeek = now.startOf('isoWeek'); const endOfWeek = now.endOf('isoWeek');
+            runForm.reset(); 
+            const linkSection = document.getElementById('link-plan-section'); 
+            runIdInput.value = runId || '';
+
+            if (runId) { // Editing an existing run
+                modalTitleEl.textContent = "Edit Run"; 
+                const runToEdit = state.loggedRuns.find(r => r.id === runId);
+                runForm.date.value = runToEdit.date; 
+                runForm.distance.value = runToEdit.distance; 
+                runForm.time.value = runToEdit.time; 
+                runForm.effort.value = runToEdit.effort; 
+                effortValueSpan.textContent = runToEdit.effort; 
+                linkSection.style.display = 'none';
+            } else { // Adding a new run
+                modalTitleEl.textContent = "Log a New Run"; 
+                runForm.date.value = dayjs().format('YYYY-MM-DD'); 
+                effortValueSpan.textContent = '5';
+                
+                // Find uncompleted runs for the current week to offer linking
+                const now = dayjs(); 
+                const startOfWeek = now.startOf('isoWeek'); 
+                const endOfWeek = now.endOf('isoWeek');
                 const weeklyPlan = state.planRuns.filter(run => dayjs(run.date).isBetween(startOfWeek, endOfWeek, null, '[]'));
                 const uncompletedRuns = weeklyPlan.filter(r => !r.completed && r.type !== 'Rest' && r.type !== 'Cross-Train');
                 const availableRunsEl = document.getElementById('available-planned-runs');
+                
                 if (uncompletedRuns.length > 0) {
                     availableRunsEl.innerHTML = uncompletedRuns.map(run => `<label class="flex items-center p-3 bg-gray-100 rounded-lg hover:bg-gray-200 cursor-pointer"><input type="radio" name="linkedRun" value="${run.id}" class="h-4 w-4 text-blue-600"><span class="ml-3 text-sm font-medium">${run.type} - ${run.distance.toFixed(1)} km</span></label>`).join('');
                     linkSection.style.display = 'block';
-                } else { linkSection.style.display = 'none'; }
+                } else { 
+                    linkSection.style.display = 'none'; 
+                }
             }
             runModal.classList.remove('hidden');
         }
         
-        function openDeleteModal(runId) { runIdToDelete = runId; deleteModal.classList.remove('hidden'); }
+        function openDeleteModal(runId) { 
+            runIdToDelete = runId; 
+            deleteModal.classList.remove('hidden'); 
+        }
         
         function deleteRun() {
             const runToDelete = state.loggedRuns.find(r => r.id === runIdToDelete);
+            // If the deleted run was linked to a plan, un-complete the plan item
             if (runToDelete && runToDelete.linkedPlanId) {
                 const planRun = state.planRuns.find(r => r.id === runToDelete.linkedPlanId);
                 if (planRun) planRun.completed = false;
             }
             state.loggedRuns = state.loggedRuns.filter(r => r.id !== runIdToDelete);
-            saveLoggedRuns(); savePlanRuns(); render(); deleteModal.classList.add('hidden'); runIdToDelete = null;
+            saveLoggedRuns(); 
+            savePlanRuns(); 
+            render(); 
+            deleteModal.classList.add('hidden'); 
+            runIdToDelete = null;
         }
 
         function saveRun() {
             const runId = runIdInput.value;
             const runData = { date: runForm.date.value, distance: parseFloat(runForm.distance.value), time: parseFloat(runForm.time.value), effort: parseInt(runForm.effort.value) };
-            if (runId) {
-                const index = state.loggedRuns.findIndex(r => r.id === runId); state.loggedRuns[index] = { ...state.loggedRuns[index], ...runData };
-            } else {
+            
+            if (runId) { // Update existing run
+                const index = state.loggedRuns.findIndex(r => r.id === runId); 
+                state.loggedRuns[index] = { ...state.loggedRuns[index], ...runData };
+            } else { // Create new run
                 const newRun = { ...runData, id: `logged-${Date.now()}`, linkedPlanId: runForm.querySelector('input[name="linkedRun"]:checked')?.value || null };
                 state.loggedRuns.push(newRun);
+                
+                // If linked to a plan, mark it as complete
                 if (newRun.linkedPlanId) {
                     const planRun = state.planRuns.find(r => r.id === newRun.linkedPlanId);
                     if (planRun) {
                         planRun.completed = true;
-                        setTimeout(() => { const planRunEl = document.querySelector(`.planned-run-item[data-id="${planRun.id}"]`); planRunEl?.classList.add('run-completed-animation'); planRunEl?.addEventListener('animationend', () => planRunEl.classList.remove('run-completed-animation'), {once: true}); }, 100);
+                        // Trigger a small animation for visual feedback
+                        setTimeout(() => { 
+                            const planRunEl = document.querySelector(`.planned-run-item[data-id="${planRun.id}"]`); 
+                            planRunEl?.classList.add('run-completed-animation'); 
+                            planRunEl?.addEventListener('animationend', () => planRunEl.classList.remove('run-completed-animation'), {once: true}); 
+                        }, 100);
                     }
                 }
             }
-            saveLoggedRuns(); savePlanRuns(); render(); runModal.classList.add('hidden');
+            saveLoggedRuns(); 
+            savePlanRuns(); 
+            render(); 
+            runModal.classList.add('hidden');
         }
 
+        /**
+         * Initializes the application.
+         */
         function init() {
-            loadState(); render(); initCharts(); setupEventListeners();
+            loadState(); 
+            render(); 
+            initCharts(); 
+            setupEventListeners();
+            // Simulate loading time for a better user experience
             setTimeout(() => {
                 state.isLoading = false;
                 document.querySelectorAll('.skeleton-loader').forEach(el => el.style.display = 'none');
